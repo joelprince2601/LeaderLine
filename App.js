@@ -1,164 +1,231 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import './App.css';
+import { Sortable } from 'sortablejs';
+import LeaderLine from 'react-leader-line';
 
 const App = () => {
-  const [startElement, setStartElement] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [connections, setConnections] = useState([]);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const connectionsRef = useRef(null);
+  const leftList = useRef(null);
+  const rightList = useRef(null);
+  const lines = useRef([]);
+  let startElement = null;
 
-  useEffect(() => {
-    const updateConnections = () => {
-      connectionsRef.current.innerHTML = '';
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [checkedIds, setCheckedIds] = useState({});
 
-      const createLine = (start, end, isTemp = false) => {
-        const line = document.createElement('div');
-        line.className = isTemp ? 'connection temp' : 'connection';
+  const isElementInViewport = (el, container) => {
+    const rect = el.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    return (
+      rect.top >= containerRect.top &&
+      rect.left >= containerRect.left &&
+      rect.bottom <= containerRect.bottom &&
+      rect.right <= containerRect.right
+    );
+  };
 
-        const startRect = start.getBoundingClientRect();
-        const endRect = isTemp ? end : end.getBoundingClientRect();
-
-        const x1 = startRect.left + startRect.width / 2 + window.scrollX;
-        const y1 = startRect.top + startRect.height / 2 + window.scrollY;
-        const x2 = isTemp ? end.x : endRect.left + endRect.width / 2 + window.scrollX;
-        const y2 = isTemp ? end.y : endRect.top + endRect.height / 2 + window.scrollY;
-
-        const length = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-        const angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
-
-        line.style.width = `${length}px`;
-        line.style.transform = `rotate(${angle}deg)`;
-        line.style.left = `${x1}px`;
-        line.style.top = `${y1}px`;
-
-        if (!isTemp) {
-          const arrow = document.createElement('div');
-          arrow.className = 'arrow';
-          arrow.style.transform = `rotate(${angle + 90}deg)`; // Ensure the arrow points to the end element
-          arrow.style.position = 'absolute';
-          arrow.style.right = '0';
-          line.appendChild(arrow);
+  const updateLines = useCallback(() => {
+    const wrapper = document.querySelector('.wrapper');
+    const leftContainer = leftList.current;
+    const rightContainer = rightList.current;
+    lines.current.forEach((line) => {
+      const { startId, endId } = line;
+      const start = document.querySelector(`[data-id="${startId}"]`);
+      const end = document.querySelector(`[data-id="${endId}"]`);
+      if (start && end) {
+        const startInViewport = isElementInViewport(start, leftContainer) && isElementInViewport(start, wrapper);
+        const endInViewport = isElementInViewport(end, rightContainer) && isElementInViewport(end, wrapper);
+        if (startInViewport && endInViewport) {
+          line.line.show();
+          line.line.position();
+        } else {
+          line.line.hide();
         }
+      }
+    });
+  }, []);
 
-        connectionsRef.current.appendChild(line);
+  const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
       };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  };
 
-      connections.forEach(({ startElement, endElement }) => {
-        createLine(startElement, endElement);
+  const handleScroll = debounce(() => {
+    setIsScrolling(true);
+    updateLines();
+    setTimeout(() => {
+      setIsScrolling(false);
+      lines.current.forEach((line) => {
+        line.line.hide();
       });
+    }, 1); // Adjust the delay time here (in milliseconds)
+  }, 1);
+  
 
-      if (isDragging && startElement) {
-        createLine(startElement, mousePosition, true);
-      }
-    };
+  const logLineCreation = (startId, endId) => {
+    console.log(`New LeaderLine created from ${startId} to ${endId}`);
+  };
 
-    const handleScrollAndResize = () => {
-      updateConnections();
-      requestAnimationFrame(handleScrollAndResize);
-    };
-
-    window.addEventListener('resize', handleScrollAndResize);
-    window.addEventListener('scroll', handleScrollAndResize);
-
-    handleScrollAndResize();
-
-    return () => {
-      window.removeEventListener('resize', handleScrollAndResize);
-      window.removeEventListener('scroll', handleScrollAndResize);
-    };
-  }, [connections, isDragging, startElement, mousePosition]);
+  const colors = ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'brown', 'yellow', 'gray', 'cyan'];
+  const startIdToColor = {};
 
   useEffect(() => {
-    const handleMouseMove = (event) => {
-      setMousePosition({ x: event.clientX, y: event.clientY });
-    };
+    Sortable.create(leftList.current, {
+      animation: 50,
+      handle: '.variable',
+      chosenClass: 'sortable-chosen',
+      dragClass: 'sortable-drag',
+      onUpdate: updateLines,
+    });
 
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-    }
+    Sortable.create(rightList.current, {
+      animation: 150,
+      handle: '.variable',
+      chosenClass: 'sortable-chosen',
+      dragClass: 'sortable-drag',
+      onUpdate: updateLines,
+    });
+
+    const wrapper = document.querySelector('.wrapper');
+    wrapper.addEventListener('scroll', handleScroll);
 
     return () => {
-      if (isDragging) {
-        window.removeEventListener('mousemove', handleMouseMove);
-      }
+      wrapper.removeEventListener('scroll', handleScroll);
     };
-  }, [isDragging]);
-
-  const handleLeftButtonClick = (event) => {
-    setStartElement(event.currentTarget);
-    setIsDragging(true);
-  };
-
-  const handleRightButtonClick = (event) => {
-    if (startElement) {
-      setConnections([...connections, { startElement, endElement: event.currentTarget }]);
-      setStartElement(null);
-      setIsDragging(false);
-    }
-  };
-
-  const handleMouseUp = (event) => {
-    if (isDragging) {
-      const rightButtons = document.querySelectorAll('.right .connect-button');
-      let isHoveringOverRightButton = false;
-
-      rightButtons.forEach((button) => {
-        const rect = button.getBoundingClientRect();
-        if (
-          event.clientX >= rect.left &&
-          event.clientX <= rect.right &&
-          event.clientY >= rect.top &&
-          event.clientY <= rect.bottom
-        ) {
-          handleRightButtonClick({ currentTarget: button });
-          isHoveringOverRightButton = true;
-        }
-      });
-
-      if (!isHoveringOverRightButton) {
-        setStartElement(null);
-        setIsDragging(false);
-      }
-    }
-  };
+  }, [handleScroll, updateLines]);
 
   useEffect(() => {
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging]);
+    updateLines();
 
-  const createButtons = (side) => {
-    return Array.from({ length: 20 }, (_, index) => (
-      <div key={`${side}-${index + 1}`}>
-        {side === 'left' ? (
-          <>
-            {`${side} ${index + 1}`} <button className="button connect-button" onMouseDown={handleLeftButtonClick}></button>
-          </>
-        ) : (
-          <>
-            <button className="button connect-button" onMouseDown={handleRightButtonClick}></button> {`${side} ${index + 1}`}
-          </>
-        )}
-      </div>
-    ));
+    const scrollContainer = document.querySelector('.scrollable-container');
+    scrollContainer.addEventListener('scroll', handleScroll);
+
+    const leftContainer = leftList.current;
+    const rightContainer = rightList.current;
+    leftContainer.addEventListener('scroll', handleScroll);
+    rightContainer.addEventListener('scroll', handleScroll);
+
+    return () => {
+      scrollContainer.removeEventListener('scroll', handleScroll);
+      leftContainer.removeEventListener('scroll', handleScroll);
+      rightContainer.removeEventListener('scroll', handleScroll);
+    };
+  }, [handleScroll, updateLines]);
+
+  const handleLeftButtonClick = (id) => {
+    startElement = leftList.current.querySelector(`[data-id="${id}"]`);
+  };
+
+  const handleRightButtonClick = (id) => {
+    const endElement = rightList.current.querySelector(`[data-id="${id}"]`);
+    if (startElement && endElement) {
+      const startId = startElement.getAttribute('data-id');
+      const endId = endElement.getAttribute('data-id');
+      if (!startIdToColor[startId]) {
+        startIdToColor[startId] = colors[Object.keys(startIdToColor).length % colors.length];
+      }
+      const lineColor = startIdToColor[startId];
+      const line = new LeaderLine(startElement, endElement, { color: lineColor, size: 2, startPlug: 'disc', endPlug: 'disc', dropShadow: true });
+      lines.current.push({ line, startId, endId });
+      logLineCreation(startId, endId); // Log the creation of the new LeaderLine
+      updateLines();
+    }
+    startElement = null;
+  };
+
+  const handleHideButtonClick = () => {
+    lines.current.forEach((line) => {
+      line.line.hide();
+    });
+  };
+
+  const handleShowButtonClick = () => {
+    updateLines();
+  };
+
+  const handleCheckboxChange = (id) => {
+    setCheckedIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
   };
 
   return (
-    <div className="App">
-      <div className="left">
-        <div className="container">
-          {createButtons('left')}
+    <div className="wrapper">
+      <div className="outer-container">
+        <div className="scrollable-container">
+          <div className={`container ${isScrolling ? 'scrolling' : ''}`}>
+            <div className={`left-container ${isScrolling ? 'small' : ''}`} ref={leftList}>
+              {[...Array(10).keys()].map((index) => (
+                <div
+                  key={`left-${index + 1}`}
+                  className="variable"
+                  data-id={`left-${index + 1}`}
+                  onClick={() => handleLeftButtonClick(`left-${index + 1}`)}
+                >
+                  {`Left ${index + 1}`}
+                </div>
+              ))}
+            </div>
+            <div className={`right-container ${isScrolling ? 'small' : ''}`} ref={rightList}>
+              {[...Array(10).keys()].map((index) => (
+                <div
+                  key={`right-${index + 1}`}
+                  className="variable"
+                  data-id={`right-${index + 1}`}
+                  onClick={() => handleRightButtonClick(`right-${index + 1}`)}
+                >
+                  {`Right ${index + 1}`}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        
+        <div className="extra-content">
+          <button onClick={handleHideButtonClick}>Hide Lines</button>
+          <button onClick={handleShowButtonClick}>Show Lines</button>
+          <h2>Additional Content</h2>
+          <p>This section contains some additional content for demonstration purposes. You can add any content you like here.</p>
+          <ul>
+            <li>Item 1</li>
+            <li>Item 2</li>
+            <li>Item 3</li>
+          </ul>
+          <p>More text here. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse euismod, urna eu tincidunt consectetur, nisi nisl aliquet nisi, a convallis tortor felis eu risus.</p>
+        </div>
+        
+        <div className="checkbox-section">
+          <h3>Select Left IDs to Display Connections</h3>
+          {[...Array(10).keys()].map((index) => {
+            const leftId = `left-${index + 1}`;
+            return (
+              <div key={`checkbox-${index + 1}`} className="checkbox-item">
+                <input
+                  type="checkbox"
+                  checked={!!checkedIds[leftId]}
+                  onChange={() => handleCheckboxChange(leftId)}
+                />
+                <label>{`Left ${index + 1} is connected to`}</label>
+                {checkedIds[leftId] && (
+                  <span className="connection-text">
+                    {lines.current
+                      .filter((line) => line.startId === leftId)
+                      .map((line) => line.endId)
+                      .join(', ')}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
-      <div className="right">
-        <div className="container">
-          {createButtons('right')}
-        </div>
-      </div>
-      <div ref={connectionsRef} className="connections"></div>
     </div>
   );
 };
